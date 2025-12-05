@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Offline Audio Transcription</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 20px; }
+        h1 { color: #333; }
+        #controls { margin-bottom: 15px; }
+        #controls a {
+            display: inline-block; margin-right: 10px; padding: 8px 12px;
+            background: #007BFF; color: white; border-radius: 5px;
+            text-decoration: none; font-size: 14px;
+        }
+        #controls a:hover { background: #0056b3; }
+        #controls select { background: white; color: black; border: 1px solid #ccc; }
+        #log { background: #fff; padding: 15px; border-radius: 10px;
+               box-shadow: 0 2px 6px rgba(0,0,0,0.2); max-height: 500px; overflow-y: auto; }
+        .entry { margin-bottom: 10px; padding: 8px; border-bottom: 1px solid #eee; }
+        .timestamp { font-size: 0.9em; color: #888; }
+        .lang { font-weight: bold; margin-left: 5px; color: #007BFF; }
+        #pagination { margin-top: 10px; text-align: center; }
+        #pagination button {
+            margin: 0 2px; padding: 5px 10px; border-radius: 5px; border: 1px solid #007BFF; background: #fff;
+            cursor: pointer;
+        }
+        #pagination button.active { background: #007BFF; color: #fff; }
+    </style>
+</head>
+<body>
+    <h1>🎤 Offline Transcription Dashboard</h1>
+    <div id="controls">
+        <a href="/download/txt">⬇ Download TXT</a>
+        <a href="/download/csv">⬇ Download CSV</a>
+        <label>Filter:
+            <select id="langFilter" onchange="fetchData(1)">
+                <option value="all">All</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="hi">Hindi</option>
+            </select>
+        </label>
+    </div>
+    <div id="log"></div>
+    <div id="pagination"></div>
+
+    <script>
+        let lastTimestamp = null;
+        let currentPage = 1;
+        const pageSize = 20;
+
+        async function fetchData(page) {
+            currentPage = page || currentPage;
+            let lang = document.getElementById("langFilter").value;
+            let res = await fetch(`/data?lang=${lang}&limit=${pageSize}`);
+            let data = await res.json();
+
+            let log = document.getElementById("log");
+            log.innerHTML = "";
+            data.reverse().forEach(item => {
+                let div = document.createElement("div");
+                div.className = "entry";
+                div.innerHTML = `<div class="timestamp">${item.timestamp} <span class="lang">[${item.language}]</span></div>
+                                 <div class="text">${item.text}</div>
+                                 ${item.audio_file ? `<audio controls src="/${item.audio_file}" style="margin-top:5px; width:300px;"></audio>` : ''}`;
+                log.appendChild(div);
+            });
+
+            // Auto scroll to newest entry
+            log.scrollTop = log.scrollHeight;
+
+            renderPagination();
+        }
+
+        function renderPagination() {
+            const pagination = document.getElementById("pagination");
+            pagination.innerHTML = "";
+            for (let i = 1; i <= 5; i++) { // simple fixed 5-page example
+                const btn = document.createElement("button");
+                btn.innerText = i;
+                if (i === currentPage) btn.classList.add("active");
+                btn.onclick = () => fetchData(i);
+                pagination.appendChild(btn);
+            }
+        }
+
+        setInterval(fetchData, 2000);
+        fetchData(1);
+    </script>
+</body>
+</html>

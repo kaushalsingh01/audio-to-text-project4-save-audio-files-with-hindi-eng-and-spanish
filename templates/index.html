@@ -1,90 +1,402 @@
+<!-- templates/index.html -->
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Offline Audio Transcription</title>
-    <style>
-        body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 20px; }
-        h1 { color: #333; }
-        #controls { margin-bottom: 15px; }
-        #controls a {
-            display: inline-block; margin-right: 10px; padding: 8px 12px;
-            background: #007BFF; color: white; border-radius: 5px;
-            text-decoration: none; font-size: 14px;
-        }
-        #controls a:hover { background: #0056b3; }
-        #controls select { background: white; color: black; border: 1px solid #ccc; }
-        #log { background: #fff; padding: 15px; border-radius: 10px;
-               box-shadow: 0 2px 6px rgba(0,0,0,0.2); max-height: 500px; overflow-y: auto; }
-        .entry { margin-bottom: 10px; padding: 8px; border-bottom: 1px solid #eee; }
-        .timestamp { font-size: 0.9em; color: #888; }
-        .lang { font-weight: bold; margin-left: 5px; color: #007BFF; }
-        #pagination { margin-top: 10px; text-align: center; }
-        #pagination button {
-            margin: 0 2px; padding: 5px 10px; border-radius: 5px; border: 1px solid #007BFF; background: #fff;
-            cursor: pointer;
-        }
-        #pagination button.active { background: #007BFF; color: #fff; }
-    </style>
+    <title>Multilingual Transcription & Chat</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles/style.css') }}">
 </head>
 <body>
-    <h1>🎤 Offline Transcription Dashboard</h1>
-    <div id="controls">
-        <a href="/download/txt">⬇ Download TXT</a>
-        <a href="/download/csv">⬇ Download CSV</a>
-        <label>Filter:
-            <select id="langFilter" onchange="fetchData(1)">
-                <option value="all">All</option>
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-                <option value="hi">Hindi</option>
-            </select>
-        </label>
+    <div class="container">
+        <!-- Transcription Panel -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">📝 Live Transcription</div>
+                <div id="online-status" class="status offline">Offline</div>
+            </div>
+            
+            <div class="tab-container">
+                <div class="tab active" onclick="switchTab('transcripts')">Transcripts</div>
+                <div class="tab" onclick="switchTab('translations')">Translations</div>
+            </div>
+            
+            <div id="transcripts-tab" class="tab-content active">
+                <table id="transcript-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Language</th>
+                            <th>Text</th>
+                            <th>Audio</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transcript-body"></tbody>
+                </table>
+                
+                <div class="controls">
+                    <select id="language-filter">
+                        <option value="all">All Languages</option>
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="hi">Hindi</option>
+                    </select>
+                    <button onclick="loadTranscripts()">Refresh</button>
+                    <button onclick="downloadTxt()">Download TXT</button>
+                    <button onclick="downloadCsv()">Download CSV</button>
+                    <button id="sync-button" onclick="syncUnvalidated()" style="display:none;">Sync Words</button>
+                </div>
+                
+                <div id="sync-info" class="sync-info" style="display:none;">
+                    <span id="sync-message"></span>
+                </div>
+            </div>
+            
+            <div id="translations-tab" class="tab-content">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Original Word</th>
+                            <th>Language</th>
+                            <th>English</th>
+                            <th>Spanish</th>
+                            <th>Hindi</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="translations-body"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Chat Panel -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">💬 Multilingual Chat</div>
+                <div class="language-selector">
+                    <div class="language-flag flag-en"></div>
+                    <div class="language-flag flag-es"></div>
+                    <div class="language-flag flag-hi"></div>
+                </div>
+            </div>
+            
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message bot">
+                        <div class="message-header">
+                            <span>Bot</span>
+                            <span>Just now</span>
+                        </div>
+                        <div class="message-text">Hello! I can translate between English, Spanish, and Hindi. How can I help you?</div>
+                    </div>
+                </div>
+                
+                <div class="chat-input">
+                    <input type="text" id="message-input" placeholder="Type your message here...">
+                    <button onclick="sendMessage()">➤</button>
+                    <!-- <button onclick="startVoiceInput()">🎤</button> -->
+                </div>
+                
+                <div class="controls">
+                    <select id="input-language">
+                        <option value="auto">Auto Detect</option>
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="hi">Hindi</option>
+                    </select>
+                    <button onclick="clearChat()">Clear Chat</button>
+                </div>
+            </div>
+        </div>
     </div>
-    <div id="log"></div>
-    <div id="pagination"></div>
-
+    
     <script>
-        let lastTimestamp = null;
-        let currentPage = 1;
-        const pageSize = 20;
-
-        async function fetchData(page) {
-            currentPage = page || currentPage;
-            let lang = document.getElementById("langFilter").value;
-            let res = await fetch(`/data?lang=${lang}&limit=${pageSize}`);
-            let data = await res.json();
-
-            let log = document.getElementById("log");
-            log.innerHTML = "";
-            data.reverse().forEach(item => {
-                let div = document.createElement("div");
-                div.className = "entry";
-                div.innerHTML = `<div class="timestamp">${item.timestamp} <span class="lang">[${item.language}]</span></div>
-                                 <div class="text">${item.text}</div>
-                                 ${item.audio_file ? `<audio controls src="/${item.audio_file}" style="margin-top:5px; width:300px;"></audio>` : ''}`;
-                log.appendChild(div);
-            });
-
-            // Auto scroll to newest entry
-            log.scrollTop = log.scrollHeight;
-
-            renderPagination();
-        }
-
-        function renderPagination() {
-            const pagination = document.getElementById("pagination");
-            pagination.innerHTML = "";
-            for (let i = 1; i <= 5; i++) { // simple fixed 5-page example
-                const btn = document.createElement("button");
-                btn.innerText = i;
-                if (i === currentPage) btn.classList.add("active");
-                btn.onclick = () => fetchData(i);
-                pagination.appendChild(btn);
+        let currentTab = 'transcripts';
+        let sessionId = 'session_' + Date.now();
+        let isOnline = navigator.onLine;
+        
+        // Update online status
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            const statusElement = document.getElementById('online-status');
+            const syncButton = document.getElementById('sync-button');
+            const syncInfo = document.getElementById('sync-info');
+            
+            if (isOnline) {
+                statusElement.textContent = 'Online';
+                statusElement.className = 'status online';
+                syncButton.style.display = 'none';
+                syncInfo.style.display = 'none';
+            } else {
+                statusElement.textContent = 'Offline';
+                statusElement.className = 'status offline';
+                syncButton.style.display = 'inline-block';
+                syncInfo.style.display = 'flex';
+                document.getElementById('sync-message').textContent = 
+                    'Words will be saved locally and synced when online';
             }
         }
+        
+        // Switch tabs
+        function switchTab(tabName) {
+            currentTab = tabName;
+            
+            // Update tab UI
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            // Load data for the tab
+            if (tabName === 'transcripts') {
+                loadTranscripts();
+            } else if (tabName === 'translations') {
+                loadTranslations();
+            }
+        }
+        
+        // Load transcripts
+        async function loadTranscripts() {
+            const langFilter = document.getElementById('language-filter').value;
+            const response = await fetch(`/data?lang=${langFilter}`);
+            const data = await response.json();
+            
+            const tbody = document.getElementById('transcript-body');
+            tbody.innerHTML = '';
+            
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.timestamp}</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:5px">
+                            <div class="language-flag flag-${item.language}"></div>
+                            ${item.language.toUpperCase()}
+                        </div>
+                    </td>
+                    <td>${item.text}</td>
+                    <td>
+                        ${item.audio_file ? 
+                            `<a href="/audio_clips/${item.audio_file.split('/').pop()}" target="_blank">🎵</a>` : 
+                            '—'}
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // Load translations
+        async function loadTranslations() {
+            const response = await fetch('/api/translations?validated=1');
+            const data = await response.json();
+            
+            const tbody = document.getElementById('translations-body');
+            tbody.innerHTML = '';
+            
+            data.translations.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${item.original_word}</strong></td>
+                    <td>${item.detected_language.toUpperCase()}</td>
+                    <td>${item.translation_en || '—'}</td>
+                    <td>${item.translation_es || '—'}</td>
+                    <td>${item.translation_hi || '—'}</td>
+                    <td>
+                        <span style="padding: 3px 8px; border-radius: 12px; 
+                                     background: ${item.is_validated ? '#d4edda' : '#fff3cd'}; 
+                                     color: ${item.is_validated ? '#155724' : '#856404'}; 
+                                     font-size: 12px;">
+                            ${item.is_validated ? 'Validated' : 'Pending'}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            addMessageToChat(message, 'user');
+            input.value = '';
+            
+            try {
+                const response = await fetch('/api/chat/text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                // Add bot response to chat
+                addBotResponseToChat(data);
+                
+            } catch (error) {
+                console.error('Chat error:', error);
+                addMessageToChat('Sorry, an error occurred. Please try again.', 'bot');
+            }
+        }
+        
+        // Add message to chat
+        function addMessageToChat(text, sender) {
+            const chatMessages = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            
+            messageDiv.className = `message ${sender}`;
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <span>${sender === 'user' ? 'You' : 'Bot'}</span>
+                    <span>${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                </div>
+                <div class="message-text">${text}</div>
+            `;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // Add bot response to chat with translations
+        function addBotResponseToChat(responseData) {
+                const chatMessages = document.getElementById('chat-messages');
+                const botResponse = responseData.bot_response;
 
-        setInterval(fetchData, 2000);
-        fetchData(1);
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message bot';
+
+                // Format the text with line breaks
+                const formattedText = botResponse.text.replace(/\n/g, '<br>');
+
+                messageDiv.innerHTML = `
+        <div class="message-header">
+            <span>Bot</span>
+            <span>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+        </div>
+        <div class="message-text">${formattedText}</div>
+    `;
+
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        
+        // Start voice input
+        // async function startVoiceInput() {
+        //     try {
+        //         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        //         const mediaRecorder = new MediaRecorder(stream);
+        //         const audioChunks = [];
+                
+        //         mediaRecorder.addEventListener("dataavailable", event => {
+        //             audioChunks.push(event.data);
+        //         });
+                
+        //         mediaRecorder.addEventListener("stop", async () => {
+        //             const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    
+        //             // Show recording indicator
+        //             addMessageToChat("Recording...", 'user');
+                    
+        //             // Send to server
+        //             const formData = new FormData();
+        //             formData.append('audio', audioBlob, 'recording.wav');
+        //             formData.append('session_id', sessionId);
+                    
+        //             const response = await fetch('/api/chat/audio', {
+        //                 method: 'POST',
+        //                 body: formData
+        //             });
+                    
+        //             const data = await response.json();
+                    
+        //             // Update chat with transcribed message and response
+        //             addMessageToChat(data.user_input.text, 'user');
+        //             addBotResponseToChat(data);
+                    
+        //             // Stop all tracks
+        //             stream.getTracks().forEach(track => track.stop());
+        //         });
+                
+        //         // Start recording
+        //         mediaRecorder.start();
+                
+        //         // Stop after 5 seconds
+        //         setTimeout(() => {
+        //             mediaRecorder.stop();
+        //         }, 5000);
+                
+        //     } catch (error) {
+        //         console.error('Voice input error:', error);
+        //         addMessageToChat('Voice input failed. Please check microphone permissions.', 'bot');
+        //     }
+        // }
+        
+        // Sync unvalidated words
+        async function syncUnvalidated() {
+            try {
+                const response = await fetch('/api/sync', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                alert(`Synced ${data.processed_count} words!`);
+                loadTranslations();
+                
+            } catch (error) {
+                console.error('Sync error:', error);
+                alert('Sync failed. Please check internet connection.');
+            }
+        }
+        
+        // Download functions
+        async function downloadTxt() {
+            window.location.href = '/download/txt';
+        }
+        
+        async function downloadCsv() {
+            window.location.href = '/download/csv';
+        }
+        
+        // Clear chat
+        function clearChat() {
+            document.getElementById('chat-messages').innerHTML = `
+                <div class="message bot">
+                    <div class="message-header">
+                        <span>Bot</span>
+                        <span>Just now</span>
+                    </div>
+                    <div class="message-text">Hello! I can translate between English, Spanish, and Hindi. How can I help you?</div>
+                </div>
+            `;
+        }
+        
+        // Enter key to send message
+        document.getElementById('message-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Online/offline event listeners
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        
+        // Initialize
+        updateOnlineStatus();
+        loadTranscripts();
+        
+        // Auto-refresh transcripts every 10 seconds
+        setInterval(loadTranscripts, 10000);
     </script>
 </body>
 </html>
