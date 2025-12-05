@@ -1,4 +1,3 @@
-# translation_service.py
 from googletrans import Translator
 import logging
 from functools import lru_cache
