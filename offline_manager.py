@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 import sqlite3
 import logging
+from meaning_service import MeaningService
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,7 @@ class OfflineManager:
     def __init__(self, db_path="transcriptions.db", json_path="data/"):
         self.db_path = db_path
         self.json_path = json_path
+        self.meaning_service = MeaningService()
         
         # Ensure JSON directory exists
         try:
@@ -238,20 +240,34 @@ class OfflineManager:
                 return False
         return True
     
-    def _save_to_database(self, word, language, translations, context="", is_offline=True):
-        """Save validated translation to database"""
+    def _save_to_database(self, word, language, translations, meanings=None, context="", is_offline=True):
+        """Save validated translation to the database with safe field mapping."""
         try:
             if not self._has_valid_translations(translations):
                 logger.warning(f"Skipping database save for '{word}' - invalid translations")
                 return False
-            
+
+            # Ensure meanings are available
+            if not meanings:
+                meanings = self.meaning_service.get_comprehensive_meaning(
+                    word, language, translations
+                )
 
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+
+            source = "offline" if is_offline else "chat"
+            synonyms_json = json.dumps(meanings.get("synonyms", []))
+            pos = meanings.get("part_of_speech", {}).get("en", "")
+            example_sentence = meanings.get("example_sentence", "")
+            complexity_score = self.meaning_service.get_word_complexity(word, language)
+
+            # --- Check if entry exists ---
             cursor.execute('''
                 SELECT id FROM translations 
                 WHERE original_word = ? AND detected_language = ?
-            ''',(word,language))
+            ''', (word, language))
+
             existing = cursor.fetchone()
 
             if existing:
@@ -260,42 +276,84 @@ class OfflineManager:
                     SET translation_en = ?, 
                         translation_es = ?, 
                         translation_hi = ?,
+                        meaning_en = ?,
+                        meaning_es = ?, 
+                        meaning_hi = ?,
+                        part_of_speech = ?,
                         context = ?,
+                        source = ?,
                         is_validated = 1,
                         validated_at = CURRENT_TIMESTAMP,
+                        example_sentence = ?,
+                        synonyms = ?,
+                        frequency_score = ?,
                         is_offline = ?
                     WHERE id = ? 
-            ''', (
-                translations.get('en'),
-                translations.get('es'),
-                translations.get('hi'),
-                context,
-                1 if is_offline else 0,
-                existing[0]
-            ))
+                ''', (
+                    translations.get("en"),
+                    translations.get("es"),
+                    translations.get("hi"),
+
+                    meanings.get("meanings", {}).get("en", ""),
+                    meanings.get("meanings", {}).get("es", ""),
+                    meanings.get("meanings", {}).get("hi", ""),
+
+                    pos,
+                    context,
+                    source,
+
+                    example_sentence,
+                    synonyms_json,
+                    complexity_score,
+                    1 if is_offline else 0,
+
+                    existing[0]
+                ))
+
                 logger.debug(f"📝 Updated existing translation for '{word}'")
+
             else:
                 cursor.execute('''
                     INSERT INTO translations 
-                    (original_word, detected_language, translation_en, translation_es, translation_hi, 
-                    context, source, is_validated, is_offline, validated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 'chat', 1, ?, CURRENT_TIMESTAMP)
+                    (original_word, detected_language,
+                    translation_en, translation_es, translation_hi,
+                    meaning_en, meaning_es, meaning_hi,
+                    part_of_speech,
+                    context, source, is_validated, is_offline,
+                    example_sentence, synonyms, frequency_score,
+                    validated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ''', (
                     word, language,
-                    translations.get('en'),
-                    translations.get('es'),
-                    translations.get('hi'),
+
+                    translations.get("en"),
+                    translations.get("es"),
+                    translations.get("hi"),
+
+                    meanings.get("meanings", {}).get("en", ""),
+                    meanings.get("meanings", {}).get("es", ""),
+                    meanings.get("meanings", {}).get("hi", ""),
+
+                    pos,
                     context,
-                    1 if is_offline else 0
+                    source,
+                    1 if is_offline else 0,
+
+                    example_sentence,
+                    synonyms_json,
+                    complexity_score
                 ))
+
                 logger.debug(f"💾 Saved new translation for '{word}' to database")
+
             conn.commit()
             conn.close()
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Database save error for '{word}': {e}")
             return False
+
     
     def _update_validated_file(self, new_validated):
         """Update validated JSON file"""
