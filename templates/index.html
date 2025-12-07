@@ -161,6 +161,36 @@
         }
         
         // Load transcripts
+        async function loadTranscripts() {
+            const langFilter = document.getElementById('language-filter').value;
+            const response = await fetch(`/data?lang=${langFilter}`);
+            const data = await response.json();
+            
+            const tbody = document.getElementById('transcript-body');
+            tbody.innerHTML = '';
+            
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.timestamp}</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:5px">
+                            <div class="language-flag flag-${item.language}"></div>
+                            ${item.language.toUpperCase()}
+                        </div>
+                    </td>
+                    <td>${item.text}</td>
+                    <td>
+                        ${item.audio_file ? 
+                            `<a href="/audio_clips/${item.audio_file.split('/').pop()}" target="_blank">🎵</a>` : 
+                            '—'}
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // Load translations
         async function loadTranslations() {
                 const response = await fetch('/api/translations?validated=1');
                 const data = await response.json();
@@ -198,35 +228,6 @@
                     tbody.appendChild(row);
                 });
             }
-        
-        // Load translations
-        async function loadTranslations() {
-            const response = await fetch('/api/translations?validated=1');
-            const data = await response.json();
-            
-            const tbody = document.getElementById('translations-body');
-            tbody.innerHTML = '';
-            
-            data.translations.forEach(item => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td><strong>${item.original_word}</strong></td>
-                    <td>${item.detected_language.toUpperCase()}</td>
-                    <td>${item.translation_en || '—'}</td>
-                    <td>${item.translation_es || '—'}</td>
-                    <td>${item.translation_hi || '—'}</td>
-                    <td>
-                        <span style="padding: 3px 8px; border-radius: 12px; 
-                                     background: ${item.is_validated ? '#d4edda' : '#fff3cd'}; 
-                                     color: ${item.is_validated ? '#155724' : '#856404'}; 
-                                     font-size: 12px;">
-                            ${item.is_validated ? 'Validated' : 'Pending'}
-                        </span>
-                    </td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
         
         async function sendMessage() {
             const input = document.getElementById('message-input');
