@@ -406,3 +406,29 @@ button:active {
     visibility: visible;
     opacity: 1;
 }
+
+.message-meanings {
+    margin-top: 10px;
+    padding: 8px;
+    background: #e8f4f8;
+    border-radius: 5px;
+    font-size: 13px;
+}
+
+.message-meanings strong {
+    color: #0c5460;
+}
+
+.meaning {
+    color: #6c757d;
+    font-style: italic;
+    font-size: 11px;
+    display: block;
+    margin-top: 2px;
+}
+
+.message-pos {
+    margin-top: 5px;
+    font-size: 12px;
+    color: #17a2b8;
+}
