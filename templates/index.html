@@ -161,34 +161,43 @@
         }
         
         // Load transcripts
-        async function loadTranscripts() {
-            const langFilter = document.getElementById('language-filter').value;
-            const response = await fetch(`/data?lang=${langFilter}`);
-            const data = await response.json();
-            
-            const tbody = document.getElementById('transcript-body');
-            tbody.innerHTML = '';
-            
-            data.forEach(item => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${item.timestamp}</td>
-                    <td>
-                        <div style="display:flex;align-items:center;gap:5px">
-                            <div class="language-flag flag-${item.language}"></div>
-                            ${item.language.toUpperCase()}
-                        </div>
-                    </td>
-                    <td>${item.text}</td>
-                    <td>
-                        ${item.audio_file ? 
-                            `<a href="/audio_clips/${item.audio_file.split('/').pop()}" target="_blank">🎵</a>` : 
-                            '—'}
-                    </td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
+        async function loadTranslations() {
+                const response = await fetch('/api/translations?validated=1');
+                const data = await response.json();
+
+                const tbody = document.getElementById('translations-body');
+                tbody.innerHTML = '';
+
+                data.translations.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+            <td><strong>${item.original_word}</strong></td>
+            <td>${item.detected_language.toUpperCase()}</td>
+            <td>
+                ${item.translation_en || '—'}
+                ${item.meaning_en ? `<br><small class="meaning">${item.meaning_en}</small>` : ''}
+            </td>
+            <td>
+                ${item.translation_es || '—'}
+                ${item.meaning_es ? `<br><small class="meaning">${item.meaning_es}</small>` : ''}
+            </td>
+            <td>
+                ${item.translation_hi || '—'}
+                ${item.meaning_hi ? `<br><small class="meaning">${item.meaning_hi}</small>` : ''}
+            </td>
+            <td>${item.part_of_speech || '—'}</td>
+            <td>
+                <span style="padding: 3px 8px; border-radius: 12px; 
+                             background: ${item.is_validated ? '#d4edda' : '#fff3cd'}; 
+                             color: ${item.is_validated ? '#155724' : '#856404'}; 
+                             font-size: 12px;">
+                    ${item.is_validated ? 'Validated' : 'Pending'}
+                </span>
+            </td>
+        `;
+                    tbody.appendChild(row);
+                });
+            }
         
         // Load translations
         async function loadTranslations() {
@@ -275,15 +284,51 @@
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message bot';
 
-                // Format the text with line breaks
-                const formattedText = botResponse.text.replace(/\n/g, '<br>');
+                // Format translations
+                let translationsHtml = '';
+                if (botResponse.translations) {
+                    translationsHtml = `
+            <div class="message-translations">
+                <strong>Translations:</strong><br>
+                ${botResponse.translations.en ? `🇺🇸 ${botResponse.translations.en}<br>` : ''}
+                ${botResponse.translations.es ? `🇪🇸 ${botResponse.translations.es}<br>` : ''}
+                ${botResponse.translations.hi ? `🇮🇳 ${botResponse.translations.hi}` : ''}
+            </div>
+        `;
+                }
+
+                // Add meanings if available
+                let meaningsHtml = '';
+                if (botResponse.meanings) {
+                    meaningsHtml = `
+            <div class="message-meanings">
+                <strong>Meanings:</strong><br>
+                ${botResponse.meanings.en ? `🇺🇸 ${botResponse.meanings.en}<br>` : ''}
+                ${botResponse.meanings.es ? `🇪🇸 ${botResponse.meanings.es}<br>` : ''}
+                ${botResponse.meanings.hi ? `🇮🇳 ${botResponse.meanings.hi}` : ''}
+            </div>
+        `;
+                }
+
+                // Add part of speech if available
+                let posHtml = '';
+                if (botResponse.part_of_speech) {
+                    posHtml = `
+            <div class="message-pos">
+                <strong>Part of Speech:</strong> ${botResponse.part_of_speech.en || ''}
+            </div>
+        `;
+                }
 
                 messageDiv.innerHTML = `
         <div class="message-header">
             <span>Bot</span>
             <span>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
-        <div class="message-text">${formattedText}</div>
+        <div class="message-text">${botResponse.text}</div>
+        ${translationsHtml}
+        ${meaningsHtml}
+        ${posHtml}
     `;
 
                 chatMessages.appendChild(messageDiv);
