@@ -7,7 +7,7 @@ vosk-model-small-en-us-0.15/
 vosk-model-small-es-0.42/
 vosk-model-small-hi-0.22/
 audio_clips/
-
+data/
 #db
 *.db
 
