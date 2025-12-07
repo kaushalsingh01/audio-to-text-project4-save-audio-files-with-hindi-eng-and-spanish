@@ -4,6 +4,7 @@ import sounddevice as sd
 import vosk
 import logging
 import offline_manager
+from datetime import datetime
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -117,6 +118,16 @@ def init_json_files():
     return json_files
 
 json_files = init_json_files()
+
+def save_to_json_with_meaning(file_type, word_data, meanings=None):
+    enriched_data = {
+        **word_data,
+        'meanings': meanings or {},
+        'timestamp':datetime.now().isoformat(),
+        'enriched':True
+    }
+
+    return save_to_json(file_type=file_type, data=enriched_data)
 
 def save_to_json(file_type, data):
     """Save data to JSON file"""
