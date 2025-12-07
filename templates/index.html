@@ -386,6 +386,30 @@
                 sendMessage();
             }
         });
+
+        async function checkTransciberStatus(){
+            try {
+                const response = await fetch('/api/transcriber/stats');
+                const data = await response.json();
+                // Add to your status display
+                const statusDiv = document.getElementById('transcriber-status');
+                if (statusDiv && data.stats) {
+                    statusDiv.innerHTML = `
+                <div class="transcriber-status">
+                    <strong>🎤 Transcriber:</strong><br>
+                    Unvalidated: ${data.stats.unvalidated || 0}<br>
+                    Validated: ${data.stats.validated || 0}<br>
+                    Status: ${data.transcriber_running ? '✅ Running' : '❌ Stopped'}
+                </div>
+            `;
+                }
+            } catch (error) {
+                console.error('Transcriber status check failed:', error);
+            }
+        }
+
+        setInterval(checkTransciberStatus, 10000);
+        checkTransciberStatus();
         
         // Online/offline event listeners
         window.addEventListener('online', updateOnlineStatus);
