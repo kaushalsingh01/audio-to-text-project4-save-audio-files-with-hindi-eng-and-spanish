@@ -53,15 +53,32 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             original_word TEXT NOT NULL,
             detected_language TEXT NOT NULL,
+        
+            -- Translations
             translation_en TEXT,
             translation_es TEXT,
             translation_hi TEXT,
+        
+            -- Meanings (in different languages)
+            meaning_en TEXT,
+            meaning_es TEXT,
+            meaning_hi TEXT,
+        
+            -- Part of speech
+            part_of_speech TEXT,
+        
+            -- Context and metadata
             context TEXT,
             source TEXT DEFAULT 'transcription',
             is_validated INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             validated_at TIMESTAMP,
-            is_offline INTEGER DEFAULT 0
+            is_offline INTEGER DEFAULT 0,
+        
+            -- Additional metadata
+            example_sentence TEXT,
+            synonyms TEXT,  -- JSON array of synonyms
+            frequency_score REAL DEFAULT 0.0
         )
     ''')
     
