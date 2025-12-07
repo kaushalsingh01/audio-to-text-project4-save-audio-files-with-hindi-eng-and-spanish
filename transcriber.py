@@ -2,6 +2,11 @@
 import os, queue, json, sqlite3, time, threading, wave
 import sounddevice as sd
 import vosk
+import logging
+import offline_manager
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Paths to models
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,18 +25,20 @@ for lang, path in MODEL_PATHS.items():
     model = vosk.Model(path)
     recognizers[lang] = vosk.KaldiRecognizer(model, 16000)
 
+
 DB_FILE = "transcriptions.db"
 AUDIO_DIR = "audio_clips"
 os.makedirs(AUDIO_DIR, exist_ok=True)
+
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
 
 q = queue.Queue()
 
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cursor = conn.cursor()
-    
-    # Create transcripts table if not exists
-    cursor.execute("""
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS transcripts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT,
@@ -39,9 +46,8 @@ def init_db():
             text TEXT,
             audio_file TEXT
         )
-    """)
+    ''')
     
-    # Create translations table if not exists
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS translations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +61,21 @@ def init_db():
             is_validated INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             validated_at TIMESTAMP,
-            audio_file_reference TEXT
+            is_offline INTEGER DEFAULT 0
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_input TEXT NOT NULL,
+            input_language TEXT NOT NULL,
+            response_en TEXT,
+            response_es TEXT,
+            response_hi TEXT,
+            translation_source TEXT DEFAULT 'unknown',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -64,6 +84,55 @@ def init_db():
 
 conn = init_db()
 
+def init_json_files():
+    """Initialize JSON files for offline storage"""
+    json_files = {
+        "unvalidated": os.path.join(DATA_DIR, "unvalidated.json"),
+        "validated": os.path.join(DATA_DIR, "validated.json")
+    }
+    
+    for name, path in json_files.items():
+        if not os.path.exists(path):
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            logger.info(f"Created {name}.json")
+    
+    return json_files
+
+json_files = init_json_files()
+
+def save_to_json(file_type, data):
+    """Save data to JSON file"""
+    try:
+        filepath = json_files.get(file_type)
+        if not filepath:
+            logger.error(f"Unknown file type: {file_type}")
+            return False
+        
+        # Read existing data
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+        else:
+            existing_data = []
+        
+        # Add new data
+        if isinstance(data, list):
+            existing_data.extend(data)
+        else:
+            existing_data.append(data)
+        
+        # Save back
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        
+        logger.debug(f"Saved to {file_type}.json: {data.get('word', 'data') if isinstance(data, dict) else 'list'}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error saving to JSON {file_type}: {e}")
+        return False
+
 def save_transcript(text, lang, audio_path=None):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
@@ -71,18 +140,96 @@ def save_transcript(text, lang, audio_path=None):
         (ts, lang, text, audio_path)
     )
     conn.commit()
+    
+    # Also extract and save words to JSON
+    saved_count = extract_and_save_words(text, lang, audio_path)
+    
+    if saved_count > 0:
+        logger.info(f"📝 Saved {saved_count} words to JSON from: '{text}'")
+    
+    return saved_count
 
+def extract_and_save_words(text, lang, audio_path=None):
+    """Extract words from transcript and save to unvalidated JSON"""
+    # Split into words and clean them
+    words = text.split()
+    saved_count = 0
+    
+    common_words = {
+        'en': {'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not', 'on', 'with', 'as', 'you', 'do', 'at'},
+        'es': {'el', 'la', 'de', 'que', 'y', 'a', 'en', 'un', 'ser', 'se', 'no', 'haber', 'por', 'con', 'su', 'para', 'como', 'estar'},
+        'hi': {'और', 'है', 'से', 'का', 'एक', 'में', 'की', 'को', 'यह', 'वह', 'न', 'कर', 'ने', 'पर', 'भी', 'तो', 'हो', 'था', 'ही'}
+    }
+    
+    # Check online status once
+    online_status = is_online()
+    
+    for word in words:
+        word_clean = word.strip('.,!?;:"\'()[]{}').lower()
+        
+        # Only save meaningful words
+        if len(word_clean) > 2 and word_clean.isalpha():
+            # Check if word is common
+            is_common = False
+            for lang_code, common_set in common_words.items():
+                if word_clean in common_set:
+                    is_common = True
+                    break
+            
+            if not is_common:
+                # Save to unvalidated JSON - ALWAYS save when offline, optional when online
+                if not online_status:  # Only save when offline
+                    unvalidated_entry = {
+                        "word": word_clean,
+                        "language": lang,
+                        "context": text,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "audio_reference": audio_path,
+                        "source": "transcription",
+                        "status": "pending",
+                        "is_offline": True
+                    }
+                    
+                    if save_to_json("unvalidated", unvalidated_entry):
+                        saved_count += 1
+                        print(f"💾 Saved offline word to JSON: '{word_clean}' ({lang})")
+                else:
+                    # When online, we could still save for learning purposes
+                    # But for now, just log it
+                    print(f"📝 Online word (not saved): '{word_clean}'")
+    
+    if saved_count > 0:
+        print(f"📝 Saved {saved_count} words from transcription to unvalidated.json")
+    
+    return saved_count
+
+
+# In transcriber.py, update the save_unvalidated_word function:
 def save_unvalidated_word(word, lang, context="", audio_path=""):
-    """Save a word to the unvalidated table"""
+    """Save a word to the unvalidated table WITHOUT audio reference"""
     try:
         cursor = conn.cursor()
+        
+        # Check if word already exists in translations table
         cursor.execute('''
-            INSERT INTO translations 
-            (original_word, detected_language, context, source, is_validated, audio_file_reference)
-            VALUES (?, ?, ?, 'transcription', 0, ?)
-        ''', (word, lang, context, audio_path))
-        conn.commit()
-        print(f"💾 Saved unvalidated word: '{word}' ({lang})")
+            SELECT id FROM translations 
+            WHERE original_word = ? AND detected_language = ?
+        ''', (word, lang))
+        
+        existing = cursor.fetchone()
+        
+        if not existing:
+            # Save to translations table WITHOUT audio_file_reference
+            cursor.execute('''
+                INSERT INTO translations 
+                (original_word, detected_language, context, source, is_validated)
+                VALUES (?, ?, ?, 'transcription', 0)
+            ''', (word, lang, context))
+            conn.commit()
+            print(f"💾 Saved unvalidated word: '{word}' ({lang})")
+        else:
+            print(f"📝 Word '{word}' already exists in translations table")
+            
     except Exception as e:
         print(f"Error saving unvalidated word: {e}")
 
@@ -140,9 +287,16 @@ def transcribe_loop():
                     if text:
                         audio_path = save_audio_chunk(data, lang)
                         print(f"[{lang.upper()}] {text}  🎵 saved {audio_path}")
+                        
+                        # Save transcript to database
                         save_transcript(text, lang, audio_path)
                         
-                        # Check for new/unvalidated words
+                        # Extract and save words to JSON - ADD THIS
+                        saved_count = extract_and_save_words(text, lang, audio_path)
+                        if saved_count > 0:
+                            print(f"   💾 Saved {saved_count} words to unvalidated.json")
+                        
+                        # Old logic for backward compatibility
                         if not is_online():
                             potential_words = extract_potential_new_words(text, lang)
                             for word in potential_words:
@@ -164,6 +318,24 @@ def detect_language_from_audio(audio_data):
         best_lang = max(results.items(), key=lambda x: x[1]["confidence"])
         return best_lang[0], best_lang[1]["text"]
     return None, ""
+
+def get_json_stats():
+    """Get statistics about JSON files"""
+    stats = {
+        "unvalidated": 0,
+        "validated": 0
+    }
+    
+    for file_type, filepath in json_files.items():
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                stats[file_type] = len(data)
+        except:
+            pass
+    
+    return stats
 
 def transcribe_with_language(audio_data, language='en'):
     if language in recognizers:
