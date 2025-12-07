@@ -65,7 +65,15 @@ class GoogletransTranslationService:
                 "es": "",
                 "hi": ""
             }
-        
+        if len(text.strip()) < 2:
+            return {
+                "original": text,
+                "detected_lang":"en",
+                "en": text,
+                "es": "",
+                "hi": ""
+            }
+
         detected_lang = self.detect_language(text)
         
         translations = {
@@ -75,12 +83,22 @@ class GoogletransTranslationService:
         
         for lang_code in ['en', 'es', 'hi']:
             if lang_code != detected_lang:
-                translations[lang_code] = self.translate_text(
-                    text, target_lang=lang_code, source_lang=detected_lang
-                )
+                try:
+                    translated = self.translate_text(text, target_lang=lang_code, source_lang=detected_lang)
+                
+                    # Check if translation is valid
+                    if translated and translated != text and not translated.startswith("[Translation failed]"):
+                        translations[lang_code] = translated
+                    else:
+                        translations[lang_code] = ""  # Empty if invalid
+                    
+                except Exception as e:
+                    self.logger.warning(f"Translation to {lang_code} failed: {e}")
+                    translations[lang_code] = ""
             else:
+                # If target is same as detected language, use original
                 translations[lang_code] = text
-        
+    
         return translations
     
     def batch_translate(self, texts, target_lang='en'):
