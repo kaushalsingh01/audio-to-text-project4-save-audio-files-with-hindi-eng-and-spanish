@@ -60,13 +60,14 @@ class MeaningService:
                         entry = data[0]
                         meanings = []
                         if 'meanings' in entry:
-                            for meaning in entry['meanings']:
-                                if 'definitions' in meaning and meaning['definitions']:
-                                    definitions = meaning['definitions']
-                                    for definition in definitions[:2]:
-                                        meaning.append({
+                            for meaning_block in entry['meanings']:
+                                if 'definitions' in meaning_block and meaning_block['definitions']:
+                                    
+                                    pos = meaning_block.get('partOfSpeech', '')
+                                    for definition in meaning_block['definitions'][:2]:
+                                        meanings.append({
                                             'definition': definition.get('definition', ''),
-                                            'partOfSpeech': meaning.get('partOfSpeech', ''),
+                                            'partOfSpeech': pos,
                                             'example': definition.get('example', '')
                                         })
                         
