@@ -446,6 +446,96 @@ def  get_transcriber_stats():
     except Exception as e:
         logger.error(f"Transciber stats error: {e}")
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/api/word/details/<word>', methods=['GET'])
+def get_word_details(word):
+    """Get detailed information about a specific word"""
+    try:
+        from meaning_service import MeaningService
+        from translation_service import GoogletransTranslationService
+        
+        meaning_service = MeaningService()
+        translation_service = GoogletransTranslationService()
+        
+        # Get translations
+        translations = translation_service.translate_to_all(word)
+        detected_lang = translations.get('detected_lang', 'en')
+        
+        # Get meanings
+        meanings = meaning_service.get_comprehensive_meaning(
+            word, detected_lang, translations
+        )
+        
+        # Check if word exists in database
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM translations 
+            WHERE original_word = ? AND detected_language = ?
+            ORDER BY created_at DESC LIMIT 1
+        ''', (word, detected_lang))
+        
+        db_entry = cursor.fetchone()
+        conn.close()
+        
+        return jsonify({
+            'word': word,
+            'detected_language': detected_lang,
+            'translations': translations,
+            'meanings': meanings,
+            'in_database': db_entry is not None,
+            'database_entry': dict(db_entry) if db_entry else None,
+            'complexity': meaning_service.get_word_complexity(word, detected_lang)
+        })
+        
+    except Exception as e:
+        logger.error(f"Word details error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/words/with-meanings', methods=['GET'])
+def get_words_with_meanings():
+    """Get all words with their meanings"""
+    try:
+        language = request.args.get('language', None)
+        
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        if language:
+            cursor.execute('''
+                SELECT original_word, detected_language,
+                       translation_en, translation_es, translation_hi,
+                       meaning_en, meaning_es, meaning_hi,
+                       part_of_speech, example_sentence
+                FROM translations 
+                WHERE detected_language = ? AND is_validated = 1
+                ORDER BY created_at DESC
+            ''', (language,))
+        else:
+            cursor.execute('''
+                SELECT original_word, detected_language,
+                       translation_en, translation_es, translation_hi,
+                       meaning_en, meaning_es, meaning_hi,
+                       part_of_speech, example_sentence
+                FROM translations 
+                WHERE is_validated = 1
+                ORDER BY created_at DESC
+                LIMIT 50
+            ''')
+        
+        words = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({
+            "words": words,
+            "count": len(words),
+            "with_meanings": sum(1 for w in words if w.get('meaning_en'))
+        })
+        
+    except Exception as e:
+        logger.error(f"Words with meanings error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # === HELPER FUNCTIONS ===
 
